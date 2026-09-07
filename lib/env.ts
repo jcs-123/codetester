@@ -5,11 +5,18 @@ import { z } from "zod";
 if (typeof window !== "undefined") {
   throw new Error("lib/env.ts was imported into a client component. Import lib/constants.ts for public values instead.");
 }
+const isBuildPhase =
+  process.env.NEXT_PHASE === "phase-production-build" ||
+  process.env.npm_lifecycle_event === "build" ||
+  Boolean(process.env.CI && !process.env.DATABASE_URL);
+
 const schema = z.object({
   NODE_ENV: z.enum(["development", "test", "production"]).default("development"),
 
   // Auth
-  AUTH_SECRET: z.string().min(16, "AUTH_SECRET must be at least 16 characters"),
+  AUTH_SECRET: z.string().min(16, "AUTH_SECRET must be at least 16 characters").default(
+    isBuildPhase ? "build-placeholder-auth-secret-min-16-chars" : (undefined as unknown as string),
+  ),
   AUTH_URL: z.url().optional(),
   AUTH_GOOGLE_ID: z.string().optional(),
   AUTH_GOOGLE_SECRET: z.string().optional(),
@@ -18,7 +25,9 @@ const schema = z.object({
   INITIAL_ADMIN_EMAIL: z.email().optional(),
 
   // Database
-  DATABASE_URL: z.string().min(1, "DATABASE_URL is required"),
+  DATABASE_URL: z.string().min(1, "DATABASE_URL is required").default(
+    isBuildPhase ? "postgresql://postgres:build@localhost:5432/build" : (undefined as unknown as string),
+  ),
 
   // Storage (Cloudflare R2) — optional until archiving is switched on
   R2_ACCOUNT_ID: z.string().optional(),
@@ -41,6 +50,7 @@ const parsed = schema.safeParse(process.env);
 
 if (!parsed.success) {
   const issues = parsed.error.issues.map((i) => `  - ${i.path.join(".")}: ${i.message}`).join("\n");
+  console.error(`\n❌ Invalid environment configuration:\n${issues}\n`);
   throw new Error(`Invalid environment configuration:\n${issues}`);
 }
 
