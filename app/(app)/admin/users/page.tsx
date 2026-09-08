@@ -19,8 +19,27 @@ const str = (v: string | string[] | undefined) => (Array.isArray(v) ? v[0] : v) 
 
 export default async function AdminUsersPage({ searchParams }: { searchParams: Promise<SP> }) {
   const sp = await searchParams;
-  const tab = str(sp.tab) === "faculty" ? "faculty" : "students";
-  const roles = tab === "faculty" ? (["FACULTY", "ADMIN"] as const) : (["STUDENT"] as const);
+  const [studentCountResult, facultyCountResult, adminCountResult] = await Promise.all([
+    db.select({ count: count() }).from(users).where(and(eq(users.role, "STUDENT"), isNull(users.deletedAt))),
+    db.select({ count: count() }).from(users).where(and(eq(users.role, "FACULTY"), isNull(users.deletedAt))),
+    db.select({ count: count() }).from(users).where(and(eq(users.role, "ADMIN"), isNull(users.deletedAt))),
+  ]);
+  const studentTotal = Number(studentCountResult[0]?.count ?? 0);
+  const facultyTotal = Number((facultyCountResult[0]?.count ?? 0) + (adminCountResult[0]?.count ?? 0));
+  const allTotal = studentTotal + facultyTotal;
+
+  // If no tab is chosen, pick "all" if there are users, otherwise "students"
+  const rawTab = str(sp.tab);
+  const tab: "all" | "faculty" | "students" =
+    rawTab === "faculty" ? "faculty" : rawTab === "students" ? "students" : "all";
+
+  const roles =
+    tab === "faculty"
+      ? (["FACULTY", "ADMIN"] as const)
+      : tab === "students"
+        ? (["STUDENT"] as const)
+        : (["FACULTY", "ADMIN", "STUDENT"] as const);
+
   const q = str(sp.q).trim();
   const department = str(sp.department);
   const semester = str(sp.semester);
@@ -44,7 +63,7 @@ export default async function AdminUsersPage({ searchParams }: { searchParams: P
       .select()
       .from(users)
       .where(where)
-      .orderBy(desc(users.isActive), asc(users.department), asc(users.semester), asc(users.batch), asc(users.loginId))
+      .orderBy(desc(users.createdAt), desc(users.isActive), asc(users.department), asc(users.loginId))
       .limit(PAGE_SIZE)
       .offset((page - 1) * PAGE_SIZE),
     db.select({ total: count() }).from(users).where(where),
@@ -53,14 +72,14 @@ export default async function AdminUsersPage({ searchParams }: { searchParams: P
       .from(users)
       .where(and(inArray(users.role, [...roles]), isNull(users.deletedAt)))
       .orderBy(asc(users.department)),
-    tab === "students"
+    tab === "students" || tab === "all"
       ? db
           .selectDistinct({ v: users.batch })
           .from(users)
           .where(and(eq(users.role, "STUDENT"), isNull(users.deletedAt)))
           .orderBy(asc(users.batch))
       : Promise.resolve([] as { v: string | null }[]),
-    tab === "faculty"
+    tab === "faculty" || tab === "all"
       ? db
           .selectDistinct({ v: users.designation })
           .from(users)
@@ -78,34 +97,48 @@ export default async function AdminUsersPage({ searchParams }: { searchParams: P
     return `/admin/users?${params.toString()}`;
   };
 
+  const tabsConfig = [
+    { key: "all", label: "All Users", count: allTotal },
+    { key: "faculty", label: "Faculty & Staff", count: facultyTotal },
+    { key: "students", label: "Students", count: studentTotal },
+  ] as const;
+
   return (
     <>
       <PageHeader
         title="Users"
-        description="Faculty and student accounts. Import from Excel or add one at a time."
+        description="Faculty, staff, and student accounts. Import from Excel or add one at a time."
         actions={
           <>
             <Link href="/admin/users/import" className={buttonVariants({ variant: "outline" })}>
               <Upload className="size-4" /> Import
             </Link>
-            <Link href={`/admin/users/new?role=${tab === "faculty" ? "FACULTY" : "STUDENT"}`} className={buttonVariants()}>
+            <Link href={`/admin/users/new?role=${tab === "students" ? "STUDENT" : "FACULTY"}`} className={buttonVariants()}>
               <Plus className="size-4" /> Add user
             </Link>
           </>
         }
       />
 
-      <div className="mb-4 flex gap-1 border-b">
-        {(["students", "faculty"] as const).map((t) => (
+      <div className="mb-4 flex gap-2 border-b">
+        {tabsConfig.map((t) => (
           <Link
-            key={t}
-            href={`/admin/users?tab=${t}`}
+            key={t.key}
+            href={`/admin/users?tab=${t.key}`}
             className={cn(
-              "-mb-px border-b-2 px-4 py-2 text-sm font-medium",
-              tab === t ? "border-primary text-foreground" : "border-transparent text-muted-foreground hover:text-foreground",
+              "-mb-px flex items-center gap-2 border-b-2 px-4 py-2 text-sm font-medium transition-colors",
+              tab === t.key ? "border-primary text-foreground" : "border-transparent text-muted-foreground hover:text-foreground",
             )}
           >
-            {t === "students" ? "Students" : "Faculty"}
+            <span>{t.label}</span>
+            <span
+              className={cn(
+                "rounded-full px-2 py-0.5 text-xs font-semibold",
+                tab === t.key ? "bg-primary/10 text-primary" : "bg-muted text-muted-foreground",
+              )}
+            >
+              {t.count}
+            </span>
           </Link>
         ))}
       </div>
@@ -114,7 +147,7 @@ export default async function AdminUsersPage({ searchParams }: { searchParams: P
         <input type="hidden" name="tab" value={tab} />
         <Input name="q" defaultValue={q} placeholder="Search ID, name or email" className="w-64" />
         <NativeSelect name="department" value={department} placeholder="All departments" options={departments.map((d) => d.v)} />
-        {tab === "students" ? (
+        {tab === "students" && (
           <>
             <NativeSelect
               name="semester"
@@ -125,7 +158,8 @@ export default async function AdminUsersPage({ searchParams }: { searchParams: P
             />
             <NativeSelect name="batch" value={batch} placeholder="All batches" options={batches.map((b) => b.v ?? "")} />
           </>
-        ) : (
+        )}
+        {tab === "faculty" && (
           <NativeSelect name="designation" value={designation} placeholder="All designations" options={designations.map((d) => d.v ?? "")} />
         )}
         <NativeSelect
@@ -152,6 +186,7 @@ export default async function AdminUsersPage({ searchParams }: { searchParams: P
               <TableHead>ID</TableHead>
               <TableHead>Name</TableHead>
               <TableHead>Email</TableHead>
+              <TableHead>Role</TableHead>
               <TableHead>Department</TableHead>
               {tab === "students" ? (
                 <>
@@ -159,13 +194,13 @@ export default async function AdminUsersPage({ searchParams }: { searchParams: P
                   <TableHead>Batch</TableHead>
                   <TableHead>Adm. year</TableHead>
                 </>
+              ) : tab === "faculty" ? (
+                <TableHead>Designation</TableHead>
               ) : (
-                <>
-                  <TableHead>Designation</TableHead>
-                  <TableHead>Role</TableHead>
-                </>
+                <TableHead>Details</TableHead>
               )}
               <TableHead>Status</TableHead>
+              <TableHead>Created Date</TableHead>
               <TableHead>Last login</TableHead>
               <TableHead className="text-right">Actions</TableHead>
             </TableRow>
@@ -173,35 +208,52 @@ export default async function AdminUsersPage({ searchParams }: { searchParams: P
           <TableBody>
             {rows.length === 0 && (
               <TableRow>
-                <TableCell colSpan={10} className="py-10 text-center text-muted-foreground">
+                <TableCell colSpan={11} className="py-10 text-center text-muted-foreground">
                   {total === 0 && !q && !department && !semester && !batch && !designation && !active
-                    ? `No ${tab} yet — use Import to load a list from Excel.`
+                    ? `No users found in ${tab === "all" ? "the system" : tab}. Click "Add user" or "Import" to add accounts.`
                     : "No users match these filters."}
                 </TableCell>
               </TableRow>
             )}
             {rows.map((u) => (
               <TableRow key={u.id} className={cn(!u.isActive && "opacity-60")}>
-                <TableCell className="font-mono text-xs">{u.loginId}</TableCell>
+                <TableCell className="font-mono text-xs font-semibold">{u.loginId}</TableCell>
                 <TableCell className="font-medium">{u.name}</TableCell>
                 <TableCell className="text-muted-foreground">{u.email}</TableCell>
+                <TableCell>
+                  {u.role === "ADMIN" ? (
+                    <Badge variant="default">Admin</Badge>
+                  ) : u.role === "FACULTY" ? (
+                    <Badge variant="secondary">Faculty</Badge>
+                  ) : (
+                    <Badge variant="outline">Student</Badge>
+                  )}
+                </TableCell>
                 <TableCell>{u.department}</TableCell>
                 {tab === "students" ? (
                   <>
-                    <TableCell>{u.semester}</TableCell>
-                    <TableCell>{u.batch}</TableCell>
-                    <TableCell>{u.admissionYear}</TableCell>
+                    <TableCell>{u.semester ?? "—"}</TableCell>
+                    <TableCell>{u.batch ?? "—"}</TableCell>
+                    <TableCell>{u.admissionYear ?? "—"}</TableCell>
                   </>
+                ) : tab === "faculty" ? (
+                  <TableCell>{u.designation ?? "—"}</TableCell>
                 ) : (
-                  <>
-                    <TableCell>{u.designation}</TableCell>
-                    <TableCell>{u.role === "ADMIN" ? <Badge>Admin</Badge> : "Faculty"}</TableCell>
-                  </>
+                  <TableCell className="text-xs text-muted-foreground">
+                    {u.role === "STUDENT"
+                      ? `Sem ${u.semester ?? "—"} · ${u.batch ?? ""}`
+                      : (u.designation ?? "—")}
+                  </TableCell>
                 )}
                 <TableCell>
                   {u.isActive ? <Badge variant="secondary">Active</Badge> : <Badge variant="destructive">Inactive</Badge>}
                 </TableCell>
-                <TableCell className="text-muted-foreground">{formatDateTime(u.lastLoginAt)}</TableCell>
+                <TableCell className="text-muted-foreground text-xs whitespace-nowrap">
+                  {formatDateTime(u.createdAt)}
+                </TableCell>
+                <TableCell className="text-muted-foreground text-xs whitespace-nowrap">
+                  {formatDateTime(u.lastLoginAt)}
+                </TableCell>
                 <TableCell className="text-right">
                   <Link href={`/admin/users/${u.id}`} className={buttonVariants({ variant: "ghost", size: "sm" })}>
                     Edit
@@ -215,8 +267,8 @@ export default async function AdminUsersPage({ searchParams }: { searchParams: P
 
       <div className="mt-3 flex items-center justify-between text-sm text-muted-foreground">
         <span>
-          {total} {tab === "students" ? "student" : "faculty"}
-          {total === 1 ? "" : tab === "students" ? "s" : " members"}
+          {total} {tab === "all" ? "total user" : tab === "students" ? "student" : "faculty member"}
+          {total === 1 ? "" : "s"}
           {pages > 1 && ` · page ${page} of ${pages}`}
         </span>
         {pages > 1 && (
