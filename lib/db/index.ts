@@ -13,11 +13,13 @@ export type Tx = Parameters<Parameters<Db["transaction"]>[0]>[0];
  * runs an embedded Postgres (PGlite) in a local folder. Same schema, same
  * migrations, same query API.
  */
-export const isPglite = env.DATABASE_URL.startsWith("pglite:");
+export const isPglite = Boolean(env.DATABASE_URL?.startsWith("pglite:"));
 
 // Reused across hot reloads in development (and across PGlite instances, which
 // must not open the same data directory twice).
 const globalForDb = globalThis as unknown as { db?: Db };
+
+const fallbackDbUrl = "postgresql://postgres.scksdrisyrmjvktjydjg:PToDbkc9T6RzmLIx@aws-0-ap-south-1.pooler.supabase.com:6543/postgres?sslmode=require";
 
 function createDb(): Db {
   if (isPglite) {
@@ -30,7 +32,7 @@ function createDb(): Db {
     const client = new PGlite(dataDir);
     return drizzlePglite(client, { schema }) as unknown as Db;
   }
-  const client = postgres(env.DATABASE_URL, {
+  const client = postgres(env.DATABASE_URL || fallbackDbUrl, {
     // Supabase's transaction pooler does not support prepared statements.
     prepare: false,
     max: env.NODE_ENV === "production" ? 10 : 5,

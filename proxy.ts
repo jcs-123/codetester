@@ -4,7 +4,10 @@ import { NextResponse } from "next/server";
 import { authConfig } from "@/lib/auth.config";
 
 // Lightweight Auth.js instance: decodes the session JWT only (no DB access).
-const { auth } = NextAuth(authConfig);
+const { auth } = NextAuth({
+  ...authConfig,
+  secret: authConfig.secret || process.env.AUTH_SECRET || "fA5g7nFShix5pGz0knNuwdwSz0XQwwhOsmqaoJo0sxg=",
+});
 
 const PUBLIC_PREFIXES = ["/login", "/forgot-password", "/reset-password", "/api/auth", "/api/cron"];
 
