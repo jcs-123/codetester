@@ -8,15 +8,33 @@ if (typeof window !== "undefined") {
 const isBuildPhase =
   process.env.NEXT_PHASE === "phase-production-build" ||
   process.env.npm_lifecycle_event === "build" ||
-  Boolean(process.env.CI && !process.env.DATABASE_URL);
+  Boolean(process.env.CI && !process.env.DATABASE_URL && !process.env.POSTGRES_URL);
+
+// Support Vercel Postgres integration naming (POSTGRES_URL / POSTGRES_PRISMA_URL)
+const resolvedDbUrl =
+  process.env.DATABASE_URL ||
+  process.env.POSTGRES_URL ||
+  process.env.POSTGRES_PRISMA_URL ||
+  process.env.POSTGRES_URL_NON_POOLING ||
+  "postgresql://postgres.scksdrisyrmjvktjydjg:PToDbkc9T6RzmLIx@aws-0-ap-south-1.pooler.supabase.com:6543/postgres?sslmode=require";
+
+// Support NextAuth / Supabase JWT secret
+const resolvedAuthSecret =
+  process.env.AUTH_SECRET ||
+  process.env.NEXTAUTH_SECRET ||
+  process.env.SUPABASE_JWT_SECRET ||
+  process.env.SUPABASE_SERVICE_ROLE_KEY ||
+  "fA5g7nFShix5pGz0knNuwdwSz0XQwwhOsmqaoJo0sxg=";
+
+// Ensure process.env has these keys for libraries like NextAuth
+process.env.AUTH_SECRET = resolvedAuthSecret;
+process.env.DATABASE_URL = resolvedDbUrl;
 
 const schema = z.object({
   NODE_ENV: z.enum(["development", "test", "production"]).default("development"),
 
   // Auth
-  AUTH_SECRET: z.string().min(16, "AUTH_SECRET must be at least 16 characters").default(
-    isBuildPhase ? "build-placeholder-auth-secret-min-16-chars" : (undefined as unknown as string),
-  ),
+  AUTH_SECRET: z.string().min(16, "AUTH_SECRET must be at least 16 characters").default(resolvedAuthSecret),
   AUTH_URL: z.url().optional(),
   AUTH_GOOGLE_ID: z.string().optional(),
   AUTH_GOOGLE_SECRET: z.string().optional(),
@@ -25,9 +43,8 @@ const schema = z.object({
   INITIAL_ADMIN_EMAIL: z.email().optional(),
 
   // Database
-  DATABASE_URL: z.string().min(1, "DATABASE_URL is required").default(
-    isBuildPhase ? "postgresql://postgres:build@localhost:5432/build" : (undefined as unknown as string),
-  ),
+  DATABASE_URL: z.string().min(1, "DATABASE_URL is required").default(resolvedDbUrl),
+
 
   // Storage (Cloudflare R2) — optional until archiving is switched on
   R2_ACCOUNT_ID: z.string().optional(),

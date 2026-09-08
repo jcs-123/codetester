@@ -10,6 +10,7 @@ import { env, googleEnabled } from "@/lib/env";
  * provider and the DB-backed `jwt` / `signIn` callbacks.
  */
 export const authConfig = {
+  secret: env.AUTH_SECRET,
   trustHost: true,
   pages: { signIn: "/login", error: "/login" },
   session: { strategy: "jwt", maxAge: 12 * 60 * 60 },
